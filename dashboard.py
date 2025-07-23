@@ -125,6 +125,64 @@ else:
     st.write("No expenses yet.")
 
 # Table
-st.subheader("All Transactions")
-st.dataframe(filtered_df)
+st.subheader("All Transactions (With Delete Option)")
+    
+# Delete and edit transactions            
+for index, row in filtered_df.iterrows():
+    col1, col2, col3 = st.columns([6, 2, 2])  # Add third column for Edit
+    
+    date_str = pd.to_datetime(row['date']).strftime("%Y-%m-%d")
+    
+    with col1:
+        st.write(
+            f"{date_str} | {row['type']} | ${row['amount']:.2f} | {row['category']} | {row['note']}"
+        )
+    
+    with col2:
+        if st.button("🗑️ Delete", key=f"delete_{row['id']}"):
+            conn = sqlite3.connect("transactions.db")
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM transactions WHERE id = ?", (row["id"],))
+            conn.commit()
+            conn.close()
+            st.success(f"Deleted transaction {row['id']}")
+            st.rerun()
+    
+    with col3:
+        if st.button("✏️ Edit", key=f"edit_{row['id']}"):
+            st.session_state["edit_id"] = row["id"]
+            st.rerun()
+
+if "edit_id" in st.session_state:
+    # Find the row to edit
+    edit_id = st.session_state["edit_id"]
+    row = filtered_df[filtered_df["id"] == edit_id].iloc[0]
+    
+    st.markdown("---")
+    st.subheader(f"✏️ Edit Transaction {edit_id}")
+    
+    with st.form("edit_form"):
+        new_type = st.selectbox("Type", ["income", "expense"], index=0 if row["type"] == "income" else 1)
+        new_amount = st.number_input("Amount", min_value=0.0, format="%.2f", value=row["amount"])
+        new_category = st.text_input("Category", value=row["category"])
+        new_note = st.text_input("Note", value=row["note"])
+        new_date = st.date_input("Date", value=pd.to_datetime(row["date"]).date())
+        
+        submitted = st.form_submit_button("Update Transaction")
+        
+        if submitted:
+            conn = sqlite3.connect("transactions.db")
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE transactions
+                SET type = ?, amount = ?, category = ?, note = ?, date = ?
+                WHERE id = ?
+            """, (new_type, new_amount, new_category, new_note, new_date.strftime("%Y-%m-%d"), edit_id))
+            conn.commit()
+            conn.close()
+            st.success("Transaction updated!")
+            del st.session_state["edit_id"]
+            st.rerun()
+
+
 
