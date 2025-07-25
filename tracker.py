@@ -1,80 +1,91 @@
+# tracker.py
 import sqlite3
-from datetime import datetime
+from datetime import date
+from typing import Optional, Iterable
+import pandas as pd
 
-# Connect to (or create) the database
-conn = sqlite3.connect("transactions.db")
-cursor = conn.cursor()
+DB_PATH = "transactions.db"
 
-# Create table if not exists
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS transactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT,
-    type TEXT,
-    amount REAL,
-    category TEXT,
-    note TEXT
-)
-""")
-conn.commit()
 
-import csv
-import os
+# ---------- low-level helpers ----------
+def _connect():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-CSV_FILE = "transactions.csv"
 
-# Create file with headers if not exists
-if not os.path.exists(CSV_FILE):
-    with open(CSV_FILE, mode="w", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow(["date", "type", "amount", "category", "note"])
+# ---------- schema ----------
+def init_db() -> None:
+    with _connect() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS transactions (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                date     TEXT    NOT NULL,
+                type     TEXT    NOT NULL CHECK(type IN ('income','expense')),
+                amount   REAL    NOT NULL,
+                category TEXT,
+                note     TEXT
+            )
+            """
+        )
 
-from datetime import datetime
 
-def add_transaction():
-    t_type = input("Type (income/expense): ").strip().lower()
-    amount = float(input("Amount: "))
-    category = input("Category: ")
-    note = input("Note: ")
-    date = datetime.now().strftime("%Y-%m-%d")
+# ---------- CRUD ----------
+def insert_transaction(t_type: str, amount: float, category: str, note: str, d: date | str) -> None:
+    date_str = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO transactions (date, type, amount, category, note) VALUES (?, ?, ?, ?, ?)",
+            (date_str, t_type, amount, category, note),
+        )
 
-    cursor.execute(
-        "INSERT INTO transactions (date, type, amount, category, note) VALUES (?, ?, ?, ?, ?)",
-        (date, t_type, amount, category, note)
-    )
-    conn.commit()
-    print("Transaction added to database!")
 
-def show_summary():
-    cursor.execute("SELECT SUM(amount) FROM transactions WHERE type = 'income'")
-    income_total = cursor.fetchone()[0] or 0
+def update_transaction(
+    tx_id: int,
+    t_type: str,
+    amount: float,
+    category: str,
+    note: str,
+    d: date | str,
+) -> None:
+    date_str = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE transactions
+               SET date = ?, type = ?, amount = ?, category = ?, note = ?
+             WHERE id = ?
+            """,
+            (date_str, t_type, amount, category, note, tx_id),
+        )
 
-    cursor.execute("SELECT SUM(amount) FROM transactions WHERE type = 'expense'")
-    expense_total = cursor.fetchone()[0] or 0
 
-    print(f"Total Income: ${income_total}")
-    print(f"Total Expenses: ${expense_total}")
-    print(f"Net: ${income_total - expense_total}")
+def delete_transaction(tx_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM transactions WHERE id = ?", (tx_id,))
 
-def main():
-    while True:
-        print("\n=== Personal Finance Tracker ===")
-        print("1. Add Transaction")
-        print("2. Show Summary")
-        print("3. Exit")
-        choice = input("Choose an option: ").strip()
 
-        if choice == "1":
-            add_transaction()
-        elif choice == "2":
-            show_summary()
-        elif choice == "3":
-            print("Goodbye!")
-            break
-        else:
-            print("Invalid option. Try again.")
+# ---------- reads ----------
+def get_transactions_df() -> pd.DataFrame:
+    with _connect() as conn:
+        return pd.read_sql_query(
+            "SELECT * FROM transactions ORDER BY date DESC, id DESC",
+            conn,
+        )
 
-if __name__ == "__main__":
-    main()
 
+# ---------- bulk import / export ----------
+def bulk_insert_df(df: pd.DataFrame) -> None:
+    """Expect columns: date, type, amount, category, note (id optional/ignored)."""
+    required = {"date", "type", "amount", "category", "note"}
+    missing = required - set(df.columns.str.lower())
+    if missing:
+        raise ValueError(f"CSV is missing columns: {missing}")
+
+    # Normalize column names to match table
+    df = df.rename(columns=str.lower)[["date", "type", "amount", "category", "note"]]
+
+    with _connect() as conn:
+        df.to_sql("transactions", conn, if_exists="append", index=False)
 
