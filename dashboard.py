@@ -61,23 +61,176 @@ filtered_df = filtered_df[
 # =========================
 # Title
 # =========================
-st.title("💰 Personal Finance Dashboard")
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📊 Dashboard", "📋 Transactions", "📂 CSV Import/Export", "📈 Trends & Analytics"
+])
+
+# ====== Tab 1: Dashboard ======
+with tab1:
+    st.title("💰 Personal Finance Dashboard")
+    
+    # Add New Transaction Form
+    with st.form("entry_form"):
+        st.subheader("➕ Add New Transaction")
+        t_type = st.selectbox("Type", ["income", "expense"])
+        amount = st.number_input("Amount", min_value=0.0, format="%.2f")
+        category = st.text_input("Category")
+        note = st.text_input("Note")
+        date = st.date_input("Date", value=datetime.date.today())
+        submitted = st.form_submit_button("Add Transaction")
+        if submitted:
+            insert_transaction(t_type, amount, category, note, date)
+            st.success("Transaction added!")
+            st.rerun()
+
+    # Step 1: Monthly Summary Cards
+    current_month = datetime.date.today().strftime("%Y-%m")
+    monthly_data = filtered_df[filtered_df['date'].dt.strftime("%Y-%m") == current_month]
+
+    monthly_income = monthly_data[monthly_data['type'] == 'income']['amount'].sum()
+    monthly_expense = monthly_data[monthly_data['type'] == 'expense']['amount'].sum()
+    monthly_net = monthly_income - monthly_expense
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("📈 Monthly Income", f"${monthly_income:.2f}")
+    col2.metric("📉 Monthly Expenses", f"${monthly_expense:.2f}")
+    col3.metric("💰 Net Balance", f"${monthly_net:.2f}")
+
+    # Pie Chart
+    st.subheader("Spending Breakdown")
+    expense_by_category = (
+        filtered_df[filtered_df['type'] == 'expense']
+        .groupby('category')['amount']
+        .sum()
+    )
+    if not expense_by_category.empty:
+        fig, ax = plt.subplots()
+        ax.pie(expense_by_category, labels=expense_by_category.index, autopct='%1.1f%%', startangle=90)
+        ax.axis('equal')
+        st.pyplot(fig)
+    else:
+        st.write("No expenses yet.")
+
+    # Step 2: Category Budgets
+    BUDGETS = {
+        "grocery": 500,
+        "food": 300,
+        "shopping": 400,
+        "investment": 1000,
+    }
+    st.subheader("🎯 Category Budgets")
+    for category, budget in BUDGETS.items():
+        spent = monthly_data[
+            (monthly_data['type'] == 'expense') &
+            (monthly_data['category'].str.lower() == category.lower())
+        ]['amount'].sum()
+        st.progress(min(spent / budget, 1.0))
+        st.write(f"**{category.capitalize()}**: ${spent:.2f} / ${budget}")
+
+# ====== Tab 2: Transactions ======
+with tab2:
+    st.subheader("All Transactions (With Delete Option)")
+    for _, row in filtered_df.iterrows():
+        c1, c2 = st.columns([6, 1])
+        date_str = pd.to_datetime(row["date"]).strftime("%Y-%m-%d")
+        with c1:
+            st.write(f"{date_str} | {row['type']} | ${row['amount']:.2f} | {row['category']} | {row['note']}")
+        with c2:
+            if st.button("🗑️ Delete", key=f"delete_{row['id']}"):
+                delete_transaction(int(row['id']))
+                st.success(f"Deleted transaction {row['id']}")
+                st.rerun()
+
+# ====== Tab 3: CSV Import/Export ======
+with tab3:
+    st.subheader("📂 CSV Export / Import")
+    csv_buf = io.StringIO()
+    filtered_df.to_csv(csv_buf, index=False)
+    st.download_button(
+    "📥 Download CSV",
+    data=csv_buf.getvalue(),
+    file_name="transactions_export.csv",
+    mime="text/csv",
+    key="download_csv_tab3"  # unique key
+)
+
+uploaded = st.file_uploader(
+    "📤 Upload CSV to Add Transactions",
+    type="csv",
+    key="upload_csv_tab3"    # unique key
+)
+
+if uploaded is not None:
+    up_df = pd.read_csv(uploaded)
+    st.write("Preview:")
+    st.dataframe(up_df.head())
+    if st.button("Import Transactions", key="import_btn_tab3"):  # unique key
+        try:
+            bulk_insert_df(up_df)
+            st.success("Transactions imported successfully!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Import failed: {e}")
+    
+   
+
+# ====== Tab 4: Add Trend Tab ======
+with tab4:
+    st.subheader("📈 Monthly Income vs Expenses")
+    if not filtered_df.empty:
+        monthly_summary = (
+            filtered_df.groupby([filtered_df['date'].dt.to_period("M"), "type"])["amount"]
+            .sum()
+            .unstack(fill_value=0)
+            .reset_index()
+        )
+        monthly_summary["date"] = monthly_summary["date"].astype(str)
+
+        fig, ax = plt.subplots()
+        ax.plot(monthly_summary["date"], monthly_summary.get("income", 0), marker="o", label="Income")
+        ax.plot(monthly_summary["date"], monthly_summary.get("expense", 0), marker="o", label="Expenses")
+        ax.set_xlabel("Month")
+        ax.set_ylabel("Amount ($)")
+        ax.set_title("Monthly Trends")
+        ax.legend()
+        plt.xticks(rotation=45)
+        st.pyplot(fig)
+    else:
+        st.write("No data for trends yet.")
+
+    # Top spending categories
+    st.subheader("Top Spending Categories (This Month)")
+    current_month = datetime.date.today().strftime("%Y-%m")
+    month_data = filtered_df[filtered_df['date'].dt.strftime("%Y-%m") == current_month]
+    top_categories = (
+        month_data[month_data['type'] == 'expense']
+        .groupby('category')['amount']
+        .sum()
+        .sort_values(ascending=False)
+        .head(5)
+    )
+
+    if not top_categories.empty:
+        st.bar_chart(top_categories)
+    else:
+        st.write("No expenses this month to display.")
+
 
 # =========================
-# Add New Transaction
+# Monthly Summary Cards
 # =========================
-with st.form("entry_form"):
-    st.subheader("➕ Add New Transaction")
-    t_type = st.selectbox("Type", ["income", "expense"])
-    amount = st.number_input("Amount", min_value=0.0, format="%.2f")
-    category = st.text_input("Category")
-    note = st.text_input("Note")
-    date = st.date_input("Date", value=datetime.date.today())
-    submitted = st.form_submit_button("Add Transaction")
-    if submitted:
-        insert_transaction(t_type, amount, category, note, date)
-        st.success("Transaction added!")
-        st.rerun()
+current_month = datetime.date.today().strftime("%Y-%m")
+monthly_data = filtered_df[filtered_df['date'].dt.strftime("%Y-%m") == current_month]
+
+monthly_income = monthly_data[monthly_data['type'] == 'income']['amount'].sum()
+monthly_expense = monthly_data[monthly_data['type'] == 'expense']['amount'].sum()
+monthly_net = monthly_income - monthly_expense
+
+col1, col2, col3 = st.columns(3)
+col1.metric("📈 Monthly Income", f"${monthly_income:.2f}")
+col2.metric("📉 Monthly Expenses", f"${monthly_expense:.2f}")
+col3.metric("💰 Net Balance", f"${monthly_net:.2f}")
+
 
 # =========================
 # Summary
@@ -107,6 +260,65 @@ if not expense_by_category.empty:
     st.pyplot(fig)
 else:
     st.write("No expenses yet.")
+
+# Top 5 Spending Categories
+st.subheader("🏆 Top 5 Spending Categories")
+expense_summary = (
+    filtered_df[filtered_df['type'] == 'expense']
+    .groupby('category')['amount']
+    .sum()
+    .sort_values(ascending=False)
+    .head(5)
+)
+
+if not expense_summary.empty:
+    st.table(expense_summary.reset_index().rename(columns={'category': 'Category', 'amount': 'Amount ($)'}))
+else:
+    st.write("No expenses yet.")
+
+# Budget Warnings
+st.subheader("🚨 Budget Overview")
+
+# Define budgets for categories (you can adjust these numbers)
+BUDGETS = {
+    "grocery": 500,
+    "shopping": 300,
+    "food": 150,
+    "entertainment": 200,
+    "investment": 1000,
+}
+
+for category, budget in BUDGETS.items():
+    spent = filtered_df[
+        (filtered_df['type'] == 'expense') &
+        (filtered_df['category'].str.lower() == category.lower())
+    ]['amount'].sum()
+
+    st.progress(min(spent / budget, 1.0))  # Show progress bar
+    st.write(f"**{category.capitalize()}**: ${spent:.2f} / ${budget}")
+
+
+
+# =========================
+# Category Budgets
+# =========================
+BUDGETS = {
+    "grocery": 500,
+    "food": 300,
+    "shopping": 400,
+    "investment": 1000,
+}
+
+st.subheader("🎯 Category Budgets")
+for category, budget in BUDGETS.items():
+    spent = monthly_data[
+        (monthly_data['type'] == 'expense') &
+        (monthly_data['category'].str.lower() == category.lower())
+    ]['amount'].sum()
+
+    st.progress(min(spent / budget, 1.0))  # Cap at 100%
+    st.write(f"**{category.capitalize()}**: ${spent:.2f} / ${budget}")
+
 
 # =========================
 # Monthly trend
