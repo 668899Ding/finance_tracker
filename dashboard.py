@@ -108,21 +108,32 @@ with tab1:
     current_month = datetime.date.today().strftime("%Y-%m")
     monthly_data = filtered_df[filtered_df['date'].dt.strftime("%Y-%m") == current_month]
 
+# ========= Pie Chart ========= #
+st.subheader("Spending Breakdown")
+expense_by_category = (
+    filtered_df[filtered_df['type'] == 'expense']
+    .groupby('category')['amount']
+    .sum()
+)
 
-    # Pie Chart
-    st.subheader("Spending Breakdown")
-    expense_by_category = (
-        filtered_df[filtered_df['type'] == 'expense']
-        .groupby('category')['amount']
-        .sum()
+if not expense_by_category.empty:
+    fig, ax = plt.subplots()
+    wedges, texts, autotexts = ax.pie(
+        expense_by_category,
+        labels=None,  # remove crowded direct labels
+        autopct='%1.1f%%',
+        startangle=90,
+        pctdistance=0.85  # bring % inside
     )
-    if not expense_by_category.empty:
-        fig, ax = plt.subplots()
-        ax.pie(expense_by_category, labels=expense_by_category.index, autopct='%1.1f%%', startangle=90)
-        ax.axis('equal')
-        st.pyplot(fig)
-    else:
-        st.write("No expenses yet.")
+
+    # Build legend with category names and values
+    labels = [f"{cat}: ${amt:.2f}" for cat, amt in expense_by_category.items()]
+    ax.legend(labels, loc="center left", bbox_to_anchor=(1, 0.5))
+    ax.axis('equal')  # Keep chart circular
+    st.pyplot(fig)
+else:
+    st.write("No expenses yet.")
+
 
     # Step 2: Category Budgets
     BUDGETS = {
@@ -199,17 +210,6 @@ with tab4:
         )
         monthly_summary["date"] = monthly_summary["date"].astype(str)
 
-        fig, ax = plt.subplots()
-        ax.plot(monthly_summary["date"], monthly_summary.get("income", 0), marker="o", label="Income")
-        ax.plot(monthly_summary["date"], monthly_summary.get("expense", 0), marker="o", label="Expenses")
-        ax.set_xlabel("Month")
-        ax.set_ylabel("Amount ($)")
-        ax.set_title("Monthly Trends")
-        ax.legend()
-        plt.xticks(rotation=45)
-        st.pyplot(fig)
-    else:
-        st.write("No data for trends yet.")
 
     # Top spending categories
     st.subheader("Top Spending Categories (This Month)")
@@ -266,13 +266,6 @@ expense_by_category = (
     .sum()
 )
 
-if not expense_by_category.empty:
-    fig, ax = plt.subplots()
-    ax.pie(expense_by_category, labels=expense_by_category.index, autopct="%1.1f%%", startangle=90)
-    ax.axis("equal")
-    st.pyplot(fig)
-else:
-    st.write("No expenses yet.")
 
 # Top 5 Spending Categories
 st.subheader("🏆 Top 5 Spending Categories")
