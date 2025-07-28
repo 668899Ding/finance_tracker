@@ -1,4 +1,5 @@
 # dashboard.py
+# ========== IMPORTS ==========
 import streamlit as st
 import pandas as pd
 import datetime
@@ -14,19 +15,39 @@ from tracker import (
     bulk_insert_df,
 )
 
+# ========== AUTH SETUP ==========
+USERNAME = "onlyheredy"
+PASSWORD = "668899Ding"
+
+# ========== AUTH GUARD ==========
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+if not st.session_state["authenticated"]:
+    st.title("🔒 Login Required")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if username == USERNAME and password == PASSWORD:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("Invalid username or password")
+    st.stop()  # ⛔ stop rest of app until logged in
+
+# ========== PAGE CONFIG ==========
 st.set_page_config(page_title="Personal Finance Dashboard", layout="centered")
 
-# --- init DB once ---
+# ========== INIT DB ==========
 init_db()
 
-# --- helpers ---
+# ========== HELPERS ==========
 def load_data() -> pd.DataFrame:
     df = get_transactions_df()
     if df.empty:
         df = pd.DataFrame(columns=["id", "date", "type", "amount", "category", "note"])
     df["date"] = pd.to_datetime(df["date"])
     return df
-
 
 # =========================
 # Sidebar filters
@@ -83,18 +104,10 @@ with tab1:
             st.success("Transaction added!")
             st.rerun()
 
-    # Step 1: Monthly Summary Cards
+   # Step 1: Monthly Summary Cards
     current_month = datetime.date.today().strftime("%Y-%m")
     monthly_data = filtered_df[filtered_df['date'].dt.strftime("%Y-%m") == current_month]
 
-    monthly_income = monthly_data[monthly_data['type'] == 'income']['amount'].sum()
-    monthly_expense = monthly_data[monthly_data['type'] == 'expense']['amount'].sum()
-    monthly_net = monthly_income - monthly_expense
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("📈 Monthly Income", f"${monthly_income:.2f}")
-    col2.metric("📉 Monthly Expenses", f"${monthly_expense:.2f}")
-    col3.metric("💰 Net Balance", f"${monthly_net:.2f}")
 
     # Pie Chart
     st.subheader("Spending Breakdown")
